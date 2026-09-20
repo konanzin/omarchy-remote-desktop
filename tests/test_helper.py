@@ -140,6 +140,40 @@ class HelperTests(unittest.TestCase):
         self.assertFalse(self.app.read_config()["enabled"])
         self.assertFalse(self.app.read_config()["autostart"])
 
+    def test_disconnect_cycles_the_unit_without_changing_saved_choices(self):
+        self.configured()
+        rd.save_json(self.app.config, {**GOOD, "enabled": True, "autostart": True})
+        self.app.unit.parent.mkdir(parents=True)
+        self.app.unit.write_text(rd.MARKER + "[Service]\n")
+        before = self.app.config.read_bytes()
+        with patch.object(rd, "systemctl", return_value="active") as control:
+            self.assertIn("still on", self.app.disconnect()["message"])
+        self.assertIn(("restart", rd.UNIT), [tuple(call.args) for call in control.call_args_list])
+        # Ending a session must never rewrite remote access or startup after login.
+        self.assertEqual(self.app.config.read_bytes(), before)
+        self.assertTrue(self.app.read_config()["enabled"])
+        self.assertTrue(self.app.read_config()["autostart"])
+
+    def test_disconnect_refuses_when_off_stopped_or_foreign(self):
+        self.configured()
+        self.app.unit.parent.mkdir(parents=True)
+        self.app.unit.write_text(rd.MARKER + "[Service]\n")
+        with patch.object(rd, "systemctl", return_value="inactive") as control:
+            with self.assertRaises(rd.Problem):
+                self.app.disconnect()
+            self.assertNotIn("restart", [call.args[0] for call in control.call_args_list])
+        rd.save_json(self.app.config, {**GOOD, "enabled": False})
+        with patch.object(rd, "systemctl") as control:
+            with self.assertRaises(rd.Problem):
+                self.app.disconnect()
+            control.assert_not_called()
+        rd.save_json(self.app.config, {**GOOD, "enabled": True})
+        self.app.unit.write_text("[Service]\nExecStart=/usr/bin/other\n")
+        with patch.object(rd, "systemctl") as control:
+            with self.assertRaises(rd.Problem):
+                self.app.disconnect()
+            control.assert_not_called()
+
     def test_configure_validates_before_stopping_and_preserves_existing_secret(self):
         self.configured()
         with patch.object(self.app, "stop") as stop, patch.object(self.app, "ensure_certificate"), \

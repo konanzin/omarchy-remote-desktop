@@ -8,7 +8,8 @@
 | Backend stable v0.1.5 | Source lacks password-file and session hooks | Incompatible |
 | Backend commit 0474d7c9b6d7897895d758a28091d3368173e430 | SHA-256 checked archive; frozen Rust build; Arch package built successfully | Built on x86_64 |
 | Backend local checks | Missing/empty secrets rejected; localhost listener; NLA selected; non-NLA negotiation rejected | Passed; no desktop session established |
-| Helper security/lifecycle/installer | 37 tests, including real isolated stand-in processes and certificate persistence | Passed; not full RDP validation |
+| Helper security/lifecycle/installer | 40 tests, including real isolated stand-in processes and certificate persistence | Passed; not full RDP validation |
+| Disconnect action | Helper cycles only the owned unit, refuses when off/stopped/foreign, and never rewrites settings | Unit-tested; live client disconnect not yet verified |
 | UI | QML lint, 5 Qt test results, real Quickshell stdin transport, mock panel on Wayland | Passed |
 | Android Windows App | Owner reports successful connection, reconnect, input, rotation, clipboard, lock, wrong-password rejection and Tailscale/mobile-data tests on 2026-09-08; exact client version not recorded | User-tested; audio delay reported |
 | Windows RDP client | Owner reports successful Windows use on 2026-09-08; exact client/version and individual acceptance items not recorded | User-tested |
@@ -40,6 +41,9 @@ report above is not an assertion that every item below was tested.
 - [ ] Existing WayVNC/RustDesk/Sunshine processes and configuration remain intact.
 - [ ] Test LAN and an existing VPN path with intended firewall/VPN restrictions.
 - [ ] Test alongside Server Mode, including lid close and battery safeguards.
+- [ ] Disconnect ends the active session while the toggle stays On and startup after login is unchanged.
+- [ ] After Disconnect the server listens again and the same client can reconnect.
+- [ ] Disconnect is absent unless a client is connected, and a second client is also dropped.
 - [ ] Complete cleanup removes only plugin-owned service/configuration/secrets.
 
 ## Mac acceptance

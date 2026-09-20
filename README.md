@@ -24,7 +24,7 @@ Screenshots use sample connection details.
    **Enable Remote Desktop**.
 
 The compact panel shows status, address, username and copy buttons. Windows
-connection files and connection instructions are one click away. Settings contains monitor/network selection, credential replacement and audio. The main toggle remembers your choice: On resumes access
+connection files and connection instructions are one click away. Settings contains monitor/network selection, credential replacement and audio. **Disconnect** appears only while a client is connected and ends that session without turning Remote Desktop off. The main toggle remembers your choice: On resumes access
 after desktop login; Off keeps access off after reboot. **Share audio** plays sound on both this computer and the
 remote device; when off, sound stays local. Installing the plugin itself never starts remote access.
 
@@ -119,6 +119,13 @@ The panel switch turns access off and cancels startup after login. Saving settin
 stops the old session; **Save settings** restarts it if sharing was on and keeps
 it off otherwise.
 Password replacement therefore disconnects existing clients.
+
+**Disconnect** ends the current RDP session and leaves remote access on, including
+startup after login. The backend exposes no session-drop interface: SIGTERM, SIGHUP
+and SIGINT all shut the whole server down, and there is no control socket. The plugin
+therefore cycles its own service, so the listener closes and reopens within a few
+seconds and every connected client is dropped, not only one. Saved settings are never
+rewritten. To stop serving altogether, use the main toggle instead.
 
 To remove configuration and credentials, choose **Settings → Remove setup →
 Confirm removal**, then remove the plugin:

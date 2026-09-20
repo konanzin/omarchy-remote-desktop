@@ -237,7 +237,21 @@ Ui.Panel {
                             visible: root.serving
                             opacity: 0.6
                         }
+                        Caption {
+                            Layout.fillWidth: true
+                            visible: root.snapshot.state === "Connected"
+                            text: "Disconnect ends the current session. Remote Desktop stays on and briefly restarts before accepting a new connection."
+                            wrapMode: Text.Wrap
+                            opacity: 0.6
+                        }
                         RowLayout {
+                            DesktopButton {
+                                visible: root.snapshot.state === "Connected"
+                                text: "Disconnect"
+                                enabled: !root.busy
+                                Accessible.name: "Disconnect the current RDP session and keep Remote Desktop on"
+                                onClicked: root.backend.execute("disconnect")
+                            }
                             DesktopButton { text: root.instructions ? "Hide connection help" : "How to connect"; onClicked: root.instructions = !root.instructions }
                             DesktopButton {
                                 text: "Settings"

@@ -460,6 +460,25 @@ WantedBy=graphical-session.target
         self.stop()
         return {"message": "Remote Desktop is off. Startup after login is off."}
 
+    def disconnect(self):
+        """End the active RDP session without changing what the user chose.
+
+        The backend has no session-drop interface: SIGTERM, SIGHUP and SIGINT
+        all shut the whole server down, and there is no control socket. The
+        managed unit is therefore cycled, which closes the client connection
+        and leaves the backend listening again. Settings are never written, so
+        remote access and startup after login keep the user's saved choice.
+        """
+        conf = self.read_config()
+        if not conf["enabled"]:
+            raise Problem("Remote access is off. Turn it on before disconnecting a client.")
+        if not self.owned_unit():
+            raise Problem("Remote Desktop is not running.")
+        if systemctl("is-active", UNIT, check=False) not in ("active", "activating"):
+            raise Problem("Remote Desktop is not running.")
+        systemctl("restart", UNIT)
+        return {"message": "Session ended. Remote Desktop is still on."}
+
     def status(self):
         conf = self.read_config(required=False)
         result = dict(configured=bool(conf), state="Off" if conf else "Setup required",
@@ -646,7 +665,7 @@ def input_json():
 def main():
     parser = argparse.ArgumentParser(description="Remote Desktop for Omarchy")
     parser.add_argument("command", choices=("check", "inventory", "status", "generate-password", "configure",
-                                            "enable", "disable", "export", "remove", "supervise", "event"))
+                                            "enable", "disable", "disconnect", "export", "remove", "supervise", "event"))
     parser.add_argument("event_args", nargs="*")
     args = parser.parse_args()
     app = App()
@@ -672,7 +691,7 @@ def main():
             request = input_json()
             with app.lock():
                 result = app.configure(request)
-        elif args.command in ("enable", "disable", "remove", "export"):
+        elif args.command in ("enable", "disable", "disconnect", "remove", "export"):
             with app.lock():
                 result = getattr(app, args.command)()
         else:

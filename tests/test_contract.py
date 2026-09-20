@@ -26,6 +26,12 @@ class ContractTests(unittest.TestCase):
         for body in labels:
             self.assertIn("textFormat: Text.PlainText", body)
 
+    def test_disconnect_action_is_offered_only_while_connected(self):
+        source = (ROOT / "Panel.qml").read_text()
+        block = re.search(r"DesktopButton\s*\{[^{}]*execute\(\"disconnect\"\)[^{}]*\}", source, re.S)
+        self.assertIsNotNone(block)
+        self.assertIn('visible: root.snapshot.state === "Connected"', block.group(0))
+
     def test_setup_never_places_password_in_command_array(self):
         service = (ROOT / "Service.qml").read_text()
         self.assertIn('worker.command = ["/usr/bin/python3", helper, command]', service)
