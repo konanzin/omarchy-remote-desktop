@@ -1,4 +1,71 @@
-# Remote Desktop for Omarchy
+# Remote Desktop for Omarchy (konanzin fork)
+
+My fork of [kostadinkadiev/omarchy-remote-desktop](https://github.com/kostadinkadiev/omarchy-remote-desktop),
+set up for my own machines: the Omarchy laptop is the server, Windows `mstsc`
+is the client, and they reach each other over Tailscale.
+
+What it changes from the original (details in [headless sessions](docs/HEADLESS.md)):
+
+- The session renders on a headless output at the client's native resolution
+  (Full HD, 2K, ultrawide) instead of mirroring the laptop panel.
+- The laptop panel turns off while a client is connected and comes back on
+  disconnect. **Super + Ctrl + Delete** brings it back by hand.
+- Closing the lid does not suspend while a client is connected.
+- Moving the `mstsc` window to another monitor resizes the session, through a
+  patched hypr-rdp backend.
+
+## Install on a new machine
+
+On the Omarchy laptop:
+
+1. **Plugin:**
+   `omarchy plugin add https://github.com/konanzin/omarchy-remote-desktop --enable`
+2. **Backend:** in a terminal, run
+   `python3 ~/.config/omarchy/plugins/kokd.remote-desktop/bin/install-backend`
+   and answer `y`. It builds the pinned hypr-rdp with the local patch in
+   `backend/`, verifying every checksum, and asks for sudo to install it.
+3. **Hyprland:** add the snippet from
+   [headless sessions](docs/HEADLESS.md#required-hyprland-config) to
+   `~/.config/hypr/monitors.lua`, then `hyprctl reload` and
+   `hyprctl configerrors`.
+4. **Firewall:** allow RDP on the Tailscale interface only, using the laptop's
+   Tailscale address (`tailscale ip -4`):
+   `sudo ufw allow in on tailscale0 to <tailscale-ip> port 3389 proto tcp comment 'omarchy-rdp'`
+5. **Panel:** open **Remote Desktop** in the bar, click **Check again**, choose
+   the Tailscale address and port 3389, set a username, generate or type a
+   password of at least 16 characters, save, and turn it on.
+
+On the Windows client:
+
+1. Connect with `mstsc` to `<tailscale-ip>`. On the first connection, compare
+   the certificate fingerprint with the one the panel shows.
+2. To stop typing the password, save it once:
+   `cmdkey /generic:TERMSRV/<tailscale-ip> /user:<username> /pass`
+   If Windows still asks, allow saved credentials for this host only (admin
+   PowerShell), since a self-signed server falls back to NTLM-only:
+   ```powershell
+   $k='HKLM:\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation'
+   New-Item "$k\AllowSavedCredentialsWhenNTLMOnly" -Force | Out-Null
+   Set-ItemProperty $k AllowSavedCredentialsWhenNTLMOnly 1 -Type DWord
+   Set-ItemProperty $k ConcatenateDefaults_AllowSavedNTLMOnly 1 -Type DWord
+   Set-ItemProperty "$k\AllowSavedCredentialsWhenNTLMOnly" 1 'TERMSRV/<tailscale-ip>'
+   gpupdate /force
+   ```
+3. Do not enable **Smart sizing**: it turns off the dynamic resolution the
+   headless session relies on.
+
+## Update
+
+- **This fork:** `omarchy plugin update kokd.remote-desktop` shows the diff
+  and fast-forwards. When `backend/` changed, rerun `install-backend`.
+- **Upstream changes:** in the plugin folder,
+  `git remote add upstream https://github.com/kostadinkadiev/omarchy-remote-desktop`
+  (once), then `git fetch upstream && git merge upstream/main`, run the tests
+  (`python3 -m unittest discover tests`), and push. Merging rather than
+  rebasing keeps the fork's published history intact.
+
+Everything below is the original plugin's documentation. Where it says to
+choose a monitor, that choice no longer affects what is captured.
 
 Access your existing Omarchy desktop over RDP from Windows, Mac, Android or
 iPhone. Windows and Android are user-tested; Mac and iPhone are untested.
