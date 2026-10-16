@@ -638,12 +638,13 @@ def child_listens(pid, address, port):
                 if target.startswith("socket:["):
                     inodes.add(target[8:-1])
         expected = socket.inet_aton(address)[::-1].hex().upper() + f":{port:04X}"
+        # Streamed, not capped: the table lists every TCP socket on the host,
+        # and a VPN or busy browser can push it far past any fixed size. A cap
+        # here reads as "stopped listening" and takes the server down.
         with open(f"/proc/{pid}/net/tcp") as file:
-            lines = file.read(MAX_IO + 1)
-        if len(lines) > MAX_IO:
-            return False
-        return any(len(parts := line.split()) > 9 and parts[1] == expected
-                   and parts[3] == "0A" and parts[9] in inodes for line in lines.splitlines()[1:])
+            next(file, None)
+            return any(len(parts := line.split()) > 9 and parts[1] == expected
+                       and parts[3] == "0A" and parts[9] in inodes for line in file)
     except OSError:
         return False
 

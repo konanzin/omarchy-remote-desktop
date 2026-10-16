@@ -251,6 +251,18 @@ class HelperTests(unittest.TestCase):
             self.assertFalse(rd.child_listens(99999999, "127.0.0.1", port))
             self.assertFalse(rd.child_listens(os.getpid(), "127.0.0.2", port))
 
+    def test_socket_readiness_survives_a_large_connection_table(self):
+        # A VPN connecting can fill the host's TCP table well past 64 KiB.
+        with socket.socket() as server, contextlib.ExitStack() as stack:
+            server.bind(("127.0.0.1", 0))
+            server.listen(1024)
+            port = server.getsockname()[1]
+            for _ in range(300):
+                stack.enter_context(socket.create_connection(("127.0.0.1", port)))
+                stack.enter_context(server.accept()[0])
+            self.assertGreater(len(Path("/proc/self/net/tcp").read_bytes()), rd.MAX_IO)
+            self.assertTrue(rd.child_listens(os.getpid(), "127.0.0.1", port))
+
     def test_status_cannot_claim_ready_from_stale_state(self):
         self.configured()
         rd.save_json(self.app.runtime / "status.json", dict(state="Connected", at=time.time() - 60))
