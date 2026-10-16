@@ -1,0 +1,91 @@
+diff --git i/src/capture/mod.rs w/src/capture/mod.rs
+index a5ff5e8..c55c6b1 100644
+--- i/src/capture/mod.rs
++++ w/src/capture/mod.rs
+@@ -59,6 +59,10 @@ struct HyprDisplayInner {
+     capture_handle: Option<std::thread::JoinHandle<()>>,
+     headless_guard: Option<HeadlessOutputGuard>,
+     pending_initial_resize: Option<DesktopSize>,
++    /// Set when a DisplayControl resize triggered a deactivation-reactivation.
++    /// The client's Confirm Active may still carry its connection-time desktop
++    /// size, which must not undo the resize it just asked for.
++    displaycontrol_reactivation: bool,
+ }
+ 
+ impl HyprDisplayInner {
+@@ -499,6 +503,7 @@ impl HyprDisplay {
+             capture_handle: None,
+             headless_guard,
+             pending_initial_resize: None,
++            displaycontrol_reactivation: false,
+         }));
+ 
+         let dims = (
+@@ -533,6 +538,19 @@ impl HyprDisplay {
+         }
+ 
+         let mut inner = self.inner.lock().await;
++        if std::mem::take(&mut inner.displaycontrol_reactivation) {
++            tracing::info!(
++                client_w = requested_w,
++                client_h = requested_h,
++                server_w = inner.width,
++                server_h = inner.height,
++                "Reactivation after DisplayControl resize; keeping the size the client requested"
++            );
++            return DesktopSize {
++                width: inner.width,
++                height: inner.height,
++            };
++        }
+         let source_size = inner
+             .output_layout
+             .snapshot()
+@@ -693,9 +711,13 @@ impl HyprDisplay {
+                     &mut resize_headless,
+                     &mut refresh_layout,
+                 ) {
+-                    let _ = inner
++                    if inner
+                         .update_tx
+-                        .try_send(DisplayUpdate::Resize(desktop_size));
++                        .try_send(DisplayUpdate::Resize(desktop_size))
++                        .is_ok()
++                    {
++                        inner.displaycontrol_reactivation = true;
++                    }
+                 }
+             }
+             ResizeTarget::PhysicalPresentation => {
+@@ -710,9 +732,13 @@ impl HyprDisplay {
+                     &mut resize_headless,
+                     &mut refresh_layout,
+                 ) {
+-                    let _ = inner
++                    if inner
+                         .update_tx
+-                        .try_send(DisplayUpdate::Resize(desktop_size));
++                        .try_send(DisplayUpdate::Resize(desktop_size))
++                        .is_ok()
++                    {
++                        inner.displaycontrol_reactivation = true;
++                    }
+                 }
+             }
+         }
+@@ -984,6 +1010,7 @@ mod output_downscaling {
+             capture_handle: None,
+             headless_guard: None,
+             pending_initial_resize: None,
++            displaycontrol_reactivation: false,
+         };
+ 
+         (
+@@ -1556,6 +1583,7 @@ mod managed_headless_resize {
+             capture_handle: None,
+             headless_guard: None,
+             pending_initial_resize: None,
++            displaycontrol_reactivation: false,
+         }
+     }
+ 

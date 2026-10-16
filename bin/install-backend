@@ -34,6 +34,8 @@ def main():
     safe_dir(cache, create=True)
     with tempfile.TemporaryDirectory(prefix="backend-", dir=cache) as temporary:
         shutil.copy2(recipe, Path(temporary) / "PKGBUILD")
+        for patch in sorted(recipe.parent.glob("*.patch")):
+            shutil.copy2(patch, Path(temporary) / patch.name)
         subprocess.run(["makepkg", "--syncdeps", "--install"], cwd=temporary, check=True)
     print("\nBackend installed. Return to Remote Desktop and click Check again.")
 

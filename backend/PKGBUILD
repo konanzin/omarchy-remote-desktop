@@ -1,7 +1,7 @@
 # Pinned backend for Remote Desktop. Update commit AND checksum together.
 pkgname=omarchy-remote-desktop-backend
 pkgver=0.1.5.r0474d7c
-pkgrel=1
+pkgrel=2
 pkgdesc='Pinned hypr-rdp backend with password-file authentication and session hooks'
 arch=('x86_64' 'aarch64')
 url='https://github.com/MuNeNICK/hypr-rdp'
@@ -12,11 +12,15 @@ options=('!debug')
 depends=('ffmpeg' 'libpulse' 'libva' 'libxkbcommon' 'mesa' 'pipewire' 'wayland')
 makedepends=('cargo' 'clang' 'cmake' 'git')
 _commit=0474d7c9b6d7897895d758a28091d3368173e430
-source=("hypr-rdp-$_commit.tar.gz::https://github.com/MuNeNICK/hypr-rdp/archive/$_commit.tar.gz")
-sha256sums=('eea1adefeb2c9b981d02555ecedba4f18dc07fe93d1e33783fb7c87378eca094')
+source=("hypr-rdp-$_commit.tar.gz::https://github.com/MuNeNICK/hypr-rdp/archive/$_commit.tar.gz"
+        'reactivation-keeps-displaycontrol-size.patch')
+sha256sums=('eea1adefeb2c9b981d02555ecedba4f18dc07fe93d1e33783fb7c87378eca094'
+            'def2a8168136e6b93a633cf897df579dbdc72c787232049190376475ce91a7e6')
 
 prepare() {
   cd "hypr-rdp-$_commit"
+  # Local: the Confirm Active after a DisplayControl resize no longer undoes it.
+  patch -Np1 -i "$srcdir/reactivation-keeps-displaycontrol-size.patch"
   cargo fetch --locked
 }
 

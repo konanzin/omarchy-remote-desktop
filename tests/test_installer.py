@@ -17,7 +17,14 @@ class InstallerTests(unittest.TestCase):
     def test_recipe_binds_source_and_dependencies(self):
         recipe = (ROOT / "backend/PKGBUILD").read_text()
         self.assertRegex(recipe, r"_commit=[0-9a-f]{40}\n")
-        self.assertRegex(recipe, r"sha256sums=\('[0-9a-f]{64}'\)")
+        # One pinned checksum per source: the archive plus each local patch.
+        sources = re.search(r"source=\(([^)]*)\)", recipe).group(1).split()
+        sums = re.search(r"sha256sums=\(([^)]*)\)", recipe).group(1).split()
+        self.assertEqual(len(sums), len(sources))
+        for value in sums:
+            self.assertRegex(value, r"^'[0-9a-f]{64}'$")
+        for patch in sorted((ROOT / "backend").glob("*.patch")):
+            self.assertIn(f"'{patch.name}'", sources)
         self.assertIn("cargo fetch --locked", recipe)
         self.assertIn("cargo build --frozen --release", recipe)
         self.assertNotIn("SKIP", recipe)
