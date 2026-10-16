@@ -48,6 +48,17 @@ end() {
   [[ -e $MARKER ]] || exit 0
   rm -f "$MARKER"
   omarchy-hyprland-monitor-internal on >/dev/null 2>&1
+
+  # The headless output outlives the session, so the workspaces that moved
+  # onto it when the panel went off have to be brought back explicitly.
+  local internal id
+  internal=$(internal_name) || exit 0
+  # Numbered workspaces only, and only from the RDP output: a docked external
+  # monitor keeps its own.
+  for id in $(hyprctl -j workspaces | jq -r \
+      '.[] | select((.monitor | startswith("hypr-rdp")) and .id > 0) | .id'); do
+    hyprctl dispatch "hl.dsp.workspace.move({ workspace = \"$id\", monitor = \"$internal\" })" >/dev/null
+  done
 }
 
 case "${1:-}" in
