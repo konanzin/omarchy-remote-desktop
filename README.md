@@ -19,7 +19,16 @@ What it changes from the original (details in [headless sessions](docs/HEADLESS.
 On the Omarchy laptop:
 
 1. **Plugin:**
-   `omarchy plugin add https://github.com/konanzin/omarchy-remote-desktop --enable`
+   `omarchy plugin add https://github.com/konanzin/omarchy-remote-desktop.git --enable`
+   If the original plugin is already installed, `plugin add` refuses the
+   duplicate `kokd.remote-desktop` id. Switch the existing copy to this fork
+   instead, keeping its settings:
+   ```sh
+   cd ~/.config/omarchy/plugins/kokd.remote-desktop
+   git remote rename origin upstream
+   git remote add origin https://github.com/konanzin/omarchy-remote-desktop.git
+   git fetch origin && git checkout -B main origin/main
+   ```
 2. **Backend:** in a terminal, run
    `python3 ~/.config/omarchy/plugins/kokd.remote-desktop/bin/install-backend`
    and answer `y`. It builds the pinned hypr-rdp with the local patch in
@@ -60,7 +69,7 @@ On the Windows client:
   and fast-forwards. When `backend/` changed, rerun `install-backend`.
 - **Upstream changes:** in the plugin folder,
   `git remote add upstream https://github.com/kostadinkadiev/omarchy-remote-desktop`
-  (once), then `git fetch upstream && git merge upstream/main`, run the tests
+  (once, unless it already exists), then `git fetch upstream && git merge upstream/main`, run the tests
   (`python3 -m unittest discover tests`), and push. Merging rather than
   rebasing keeps the fork's published history intact.
 
@@ -108,7 +117,7 @@ cannot finish setup. Building can take several minutes and several GB of disk.
 ## Install the plugin
 
 ```sh
-omarchy plugin add https://github.com/kostadinkadiev/omarchy-remote-desktop.git --enable
+omarchy plugin add https://github.com/konanzin/omarchy-remote-desktop.git --enable
 ```
 
 Requirements: Omarchy's Quickshell shell, Hyprland 0.54+, Python 3.10+, systemd
