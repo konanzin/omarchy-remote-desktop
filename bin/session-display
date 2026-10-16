@@ -22,6 +22,7 @@ FLAG="$HOME/.local/state/omarchy/toggles/hypr/internal-monitor-disable.lua"
 STATE="${XDG_RUNTIME_DIR:?}/omarchy-remote-desktop"
 MARKER="$STATE/display-switched"
 INHIBITOR="$STATE/lid-inhibitor.pid"
+MODE_FILE="$HOME/.local/state/omarchy-remote-desktop/headless-mode"
 WAIT_SEC=5
 
 internal_name() {
@@ -72,15 +73,31 @@ switch_display() {
   hyprctl eval "hl.monitor({ output = \"$internal\", disabled = true })" >/dev/null
 }
 
+# hypr-rdp skips a resize to the size it believes the output already has, so
+# a later reload must put back this size, not a default. Read by the
+# hypr-rdp monitor rule in ~/.config/hypr/monitors.lua.
+save_headless_mode() {
+  local size
+  size=$(hyprctl -j monitors | jq -r \
+    'first(.[] | select(.name | startswith("hypr-rdp")) | "\(.width)x\(.height)") // empty')
+  [[ $size =~ ^[0-9]+x[0-9]+$ ]] || return 0
+  mkdir -p "$(dirname "$MODE_FILE")"
+  printf '%s@60\n' "$size" >"$MODE_FILE"
+}
+
 restore_display() {
   [[ -e $MARKER ]] || return 0
   rm -f "$MARKER"
+  # Before the reload below, which re-reads it.
+  save_headless_mode
   omarchy-hyprland-monitor-internal on >/dev/null 2>&1
 
   # The headless output outlives the session, so the workspaces that moved
-  # onto it when the panel went off have to be brought back explicitly.
+  # onto it when the panel went off have to be brought back explicitly. Its
+  # own workspace goes back first, or it takes a numbered one.
   local internal id
   internal=$(internal_name) || return 0
+  hyprctl dispatch 'hl.dsp.workspace.move({ workspace = "name:rdp", monitor = "hypr-rdp" })' >/dev/null
   # Numbered workspaces only, and only from the RDP output: a docked external
   # monitor keeps its own.
   for id in $(hyprctl -j workspaces | jq -r \
