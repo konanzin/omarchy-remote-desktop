@@ -400,8 +400,10 @@ WantedBy=graphical-session.target
         return {"message": "Settings saved. Remote access is off."}
 
     @staticmethod
-    def match_inventory(conf, live):
-        if conf["output"] not in [o["name"] for o in live["outputs"]]:
+    def match_inventory(conf, live, check_output=True):
+        # The session renders on its own headless output, so the configured
+        # monitor matters only while it is still being chosen in Settings.
+        if check_output and conf["output"] not in [o["name"] for o in live["outputs"]]:
             raise Problem("The selected monitor is unavailable. Reconnect it or choose another.")
         if conf["address"] not in [a["address"] for a in live["addresses"]]:
             raise Problem("The selected network is unavailable. Reconnect or choose another address.")
@@ -420,7 +422,7 @@ WantedBy=graphical-session.target
             raise Problem(backend["message"])
         self.credential()
         self.ensure_certificate()
-        self.match_inventory(conf, inventory())
+        self.match_inventory(conf, inventory(), check_output=False)
 
     def enable(self):
         conf = self.read_config()
@@ -537,13 +539,18 @@ WantedBy=graphical-session.target
     def backend_args(self, conf, generation):
         write_file(self.data / "backend.toml", "# Deliberately empty; all options below are controlled by the helper.\n")
         callback = [sys.executable, str(self.root / "bin/remote-desktopctl"), "event"]
+        display = str(self.root / "bin/session-display")
+        # No --output: the backend creates a headless output sized to the
+        # client, and session-display moves the desktop onto it.
         return [shutil.which("hypr-rdp") or "hypr-rdp", "--config", str(self.data / "backend.toml"),
                 "--bind", f'{conf["address"]}:{conf["port"]}', "--username", conf["username"],
                 "--password-file", str(self.data / "password"), "--cert", str(self.data / "cert.pem"),
-                "--key", str(self.data / "key.pem"), "--output", conf["output"], "--fps", "30",
+                "--key", str(self.data / "key.pem"), "--fps", "30",
                 "--egfx-codec", "avc420", "--audio-mode", "mirror" if conf["audio"] else "off",
-                "--on-session-start", shlex.join(callback + ["start", generation]),
-                "--on-session-end", shlex.join(callback + ["end", generation])]
+                "--on-session-start", shlex.join([display, "start"]) + "; "
+                + shlex.join(callback + ["start", generation]),
+                "--on-session-end", shlex.join([display, "end"]) + "; "
+                + shlex.join(callback + ["end", generation])]
 
     def report(self, state, error=""):
         save_json(self.runtime / "status.json", dict(state=state, error=error, at=time.time()))
@@ -593,7 +600,7 @@ WantedBy=graphical-session.target
                 if not current["enabled"]:
                     break
                 self.credential()
-                self.match_inventory(conf, inventory())
+                self.match_inventory(conf, inventory(), check_output=False)
                 event = read_json(self.runtime / "event.json", missing=True)
                 connected = bool(event and event.get("generation") == generation and event.get("connected"))
                 # Inspect the child's socket ownership, not another server's port.
@@ -616,6 +623,10 @@ WantedBy=graphical-session.target
                 except subprocess.TimeoutExpired:
                     child.kill()
                     child.wait()
+            # A backend that died mid-session cannot run its end hook, so the
+            # laptop panel would stay off. A no-op unless a session switched it.
+            with contextlib.suppress(Problem):
+                run([str(self.root / "bin/session-display"), "end"], timeout=10, check=False)
 
 
 def child_listens(pid, address, port):

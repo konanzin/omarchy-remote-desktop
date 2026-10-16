@@ -108,7 +108,10 @@ class HelperTests(unittest.TestCase):
         self.assertNotIn(PASSWORD, " ".join(args))
         self.assertNotIn("--password", args)
         self.assertEqual(args[args.index("--password-file") + 1], str(self.app.data / "password"))
-        self.assertEqual(args[args.index("--output") + 1], "DP-1")
+        self.assertNotIn("--output", args)
+        display = str(self.root / "bin/session-display")
+        self.assertTrue(args[args.index("--on-session-start") + 1].startswith(display + " start; "))
+        self.assertTrue(args[args.index("--on-session-end") + 1].startswith(display + " end; "))
         self.assertEqual(args[args.index("--bind") + 1], "192.168.1.5:3389")
         self.assertIn("--config", args)
         self.assertEqual(args[args.index("--audio-mode") + 1], "off")
@@ -131,6 +134,10 @@ class HelperTests(unittest.TestCase):
                         dict(outputs=LIVE["outputs"], addresses=[])):
             with self.assertRaises(rd.Problem):
                 self.app.match_inventory(GOOD, missing)
+        # A running session disables the laptop panel; only the network counts.
+        self.app.match_inventory(GOOD, dict(outputs=[], addresses=LIVE["addresses"]), check_output=False)
+        with self.assertRaises(rd.Problem):
+            self.app.match_inventory(GOOD, dict(outputs=LIVE["outputs"], addresses=[]), check_output=False)
 
     def test_disable_revokes_before_systemctl_failure(self):
         self.configured()

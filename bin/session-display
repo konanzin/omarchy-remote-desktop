@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# Moves the desktop onto the RDP session's headless output while a client is
+# connected, and back to the laptop panel when it leaves.
+#
+#   session-display start|end
+#
+# Uses Omarchy's own internal-monitor-disable flag, so its monitor watcher
+# leaves the panel off during the session and its boot-time recovery clears the
+# flag after a crash. The panel is disabled at runtime, without
+# `hyprctl reload`: a reload resets the headless output to its default mode.
+# `end` only undoes what `start` did, never a panel the user turned off.
+
+set -uo pipefail
+
+FLAG="$HOME/.local/state/omarchy/toggles/hypr/internal-monitor-disable.lua"
+MARKER="${XDG_RUNTIME_DIR:?}/omarchy-remote-desktop/display-switched"
+WAIT_SEC=5
+
+internal_name() {
+  local name
+  name=$(omarchy-hyprland-monitor-laptop 2>/dev/null)
+  # Written into Lua below, so only a plain connector name may pass.
+  [[ $name =~ ^[A-Za-z0-9._-]+$ ]] && printf '%s' "$name"
+}
+
+start() {
+  local internal
+  internal=$(internal_name) || exit 0
+  # Already off by the user's own choice: leave it, and leave it to them.
+  [[ -f $FLAG ]] && exit 0
+
+  # Never switch off the panel unless another output is showing the desktop.
+  local waited=0
+  until omarchy-hyprland-monitor-external-active; do
+    (( waited >= WAIT_SEC * 10 )) && exit 0
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+
+  mkdir -p "$(dirname "$FLAG")"
+  : >"$MARKER"
+  printf 'hl.monitor({ output = "%s", disabled = true })\n' "$internal" >"$FLAG"
+  hyprctl eval "hl.monitor({ output = \"$internal\", disabled = true })" >/dev/null
+}
+
+end() {
+  [[ -e $MARKER ]] || exit 0
+  rm -f "$MARKER"
+  omarchy-hyprland-monitor-internal on >/dev/null 2>&1
+}
+
+case "${1:-}" in
+  start) start ;;
+  end) end ;;
+  *) echo "Usage: $(basename "$0") {start|end}" >&2; exit 1 ;;
+esac

@@ -49,8 +49,11 @@ app.backend_args = lambda *args: [sys.executable, str(base/'child.py')]
 result = app.supervise()
 sys.exit(1 if result.get('failed') else 0)
 ''')
+        # The supervisor's exit runs the real session-display; a private runtime
+        # directory keeps it from ever touching a live session's marker.
         self.proc = subprocess.Popen([sys.executable, str(driver), str(ROOT), str(self.base)],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                     env={**os.environ, "XDG_RUNTIME_DIR": str(self.runtime)})
         self.addCleanup(self.cleanup_proc)
         self.wait_for(lambda: self.child_script.with_suffix('.pid').exists())
         self.pid = int(self.child_script.with_suffix('.pid').read_text())
@@ -92,9 +95,12 @@ sys.exit(1 if result.get('failed') else 0)
         (self.flags / "network").unlink()
         self.assert_stopped()
 
-    def test_monitor_loss_stops_backend(self):
+    def test_monitor_loss_keeps_headless_session(self):
+        # session-display disables the laptop panel while a client is connected.
         (self.flags / "monitor").unlink()
-        self.assert_stopped()
+        time.sleep(1.2)
+        self.assertIsNone(self.proc.poll())
+        os.kill(self.pid, 0)
 
     def test_deleted_password_stops_backend(self):
         (self.data / "password").unlink()
