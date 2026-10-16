@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Moves the desktop onto the RDP session's headless output while a client is
-# connected, and back to the laptop panel when it leaves.
+# connected, and back to the laptop panel when it leaves. Closing the lid does
+# not suspend the machine while a client is connected.
 #
 #   session-display start|end
 #
@@ -10,11 +11,17 @@
 # flag after a crash. The panel is disabled at runtime, without
 # `hyprctl reload`: a reload resets the headless output to its default mode.
 # `end` only undoes what `start` did, never a panel the user turned off.
+#
+# The lid is held with a logind block inhibitor, which runs inside the service's
+# cgroup and so dies with it. Omarchy still locks the screen on lid close; only
+# the suspend is held back.
 
 set -uo pipefail
 
 FLAG="$HOME/.local/state/omarchy/toggles/hypr/internal-monitor-disable.lua"
-MARKER="${XDG_RUNTIME_DIR:?}/omarchy-remote-desktop/display-switched"
+STATE="${XDG_RUNTIME_DIR:?}/omarchy-remote-desktop"
+MARKER="$STATE/display-switched"
+INHIBITOR="$STATE/lid-inhibitor.pid"
 WAIT_SEC=5
 
 internal_name() {
@@ -24,16 +31,37 @@ internal_name() {
   [[ $name =~ ^[A-Za-z0-9._-]+$ ]] && printf '%s' "$name"
 }
 
-start() {
+hold_lid() {
+  release_lid
+  systemd-inhibit --what=handle-lid-switch --mode=block \
+    --who="Remote Desktop" --why="An RDP session is connected" \
+    sleep infinity </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" >"$INHIBITOR"
+}
+
+# Checks the process is still the inhibitor, so a recycled pid is never killed.
+release_lid() {
+  local pid
+  pid=$(cat "$INHIBITOR" 2>/dev/null) || return 0
+  rm -f "$INHIBITOR"
+  [[ $pid =~ ^[0-9]+$ ]] || return 0
+  [[ $(cat "/proc/$pid/comm" 2>/dev/null) == systemd-inhibit ]] || return 0
+  # systemd-inhibit does not pass the signal on to the command it holds open.
+  pkill -P "$pid" -x sleep 2>/dev/null
+  kill "$pid" 2>/dev/null
+  return 0
+}
+
+switch_display() {
   local internal
-  internal=$(internal_name) || exit 0
+  internal=$(internal_name) || return 0
   # Already off by the user's own choice: leave it, and leave it to them.
-  [[ -f $FLAG ]] && exit 0
+  [[ -f $FLAG ]] && return 0
 
   # Never switch off the panel unless another output is showing the desktop.
   local waited=0
   until omarchy-hyprland-monitor-external-active; do
-    (( waited >= WAIT_SEC * 10 )) && exit 0
+    (( waited >= WAIT_SEC * 10 )) && return 0
     sleep 0.1
     waited=$((waited + 1))
   done
@@ -44,21 +72,33 @@ start() {
   hyprctl eval "hl.monitor({ output = \"$internal\", disabled = true })" >/dev/null
 }
 
-end() {
-  [[ -e $MARKER ]] || exit 0
+restore_display() {
+  [[ -e $MARKER ]] || return 0
   rm -f "$MARKER"
   omarchy-hyprland-monitor-internal on >/dev/null 2>&1
 
   # The headless output outlives the session, so the workspaces that moved
   # onto it when the panel went off have to be brought back explicitly.
   local internal id
-  internal=$(internal_name) || exit 0
+  internal=$(internal_name) || return 0
   # Numbered workspaces only, and only from the RDP output: a docked external
   # monitor keeps its own.
   for id in $(hyprctl -j workspaces | jq -r \
       '.[] | select((.monitor | startswith("hypr-rdp")) and .id > 0) | .id'); do
     hyprctl dispatch "hl.dsp.workspace.move({ workspace = \"$id\", monitor = \"$internal\" })" >/dev/null
   done
+}
+
+start() {
+  hold_lid
+  switch_display
+}
+
+# Display first: with the lid still shut, releasing the inhibitor lets logind
+# suspend, and the panel should be back before that.
+end() {
+  restore_display
+  release_lid
 }
 
 case "${1:-}" in
