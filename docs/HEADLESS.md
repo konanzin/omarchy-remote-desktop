@@ -57,3 +57,18 @@ Then run `hyprctl reload` and check `hyprctl configerrors`.
 - A `hyprctl reload` during a session puts the output back to the last saved
   size; reconnect if the picture looks wrong.
 - Tested with Windows `mstsc` over Tailscale on Hyprland 0.56 and Omarchy.
+
+## Troubleshooting
+
+The backend's own output is in
+`$XDG_RUNTIME_DIR/omarchy-remote-desktop/backend.log`, replaced on each start.
+
+- **`failed to create headless output: Hyprland IPC error: Name already taken`**:
+  something else holds the `hypr-rdp` name. Usually a leftover
+  `hl.monitor({ output = "hypr-rdp", disabled = true })` rule (HyprMon writes
+  one) keeps the old output alive but disabled. Remove that rule, then
+  `hyprctl reload`, `hyprctl output remove hypr-rdp` and restart the service.
+- **The session drops right after connecting**: switching the desktop onto
+  the headless output stalls Hyprland for a moment. The supervisor tolerates
+  network checks that fail during that stall for a few seconds; if sessions still
+  drop, the log above shows whether the backend itself exited.

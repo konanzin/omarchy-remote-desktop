@@ -31,6 +31,10 @@ UNIT = "omarchy-remote-desktop.service"
 MARKER = "# Managed by kokd.remote-desktop\n"
 MAX_IO = 65536
 ROOT = Path(__file__).resolve().parent.parent
+# Seconds of consecutive failed network checks tolerated while serving. Moving
+# the desktop onto the headless output stalls Hyprland, and the system with it,
+# for a moment; a single slow check must not take a live session down.
+DISCOVERY_GRACE = 10
 FLAGS = ("--password-file", "--output", "--cert", "--key", "--config",
          "--on-session-start", "--on-session-end", "--audio-mode", "--egfx-codec")
 
@@ -207,14 +211,11 @@ def validate_password(password):
     return password
 
 
-def inventory():
+def network_addresses():
+    """Private addresses this host can bind. Never asks Hyprland, so a busy
+    compositor cannot fail it."""
     try:
-        monitors = json.loads(run(["hyprctl", "-j", "monitors"], timeout=1))
         interfaces = json.loads(run(["ip", "-j", "-4", "address", "show", "up"], timeout=1))
-        outputs = [dict(name=m["name"], label=str(m.get("description") or m["name"])[:160])
-                   for m in monitors[:32] if isinstance(m, dict)
-                   and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", str(m.get("name", "")))
-                   and not str(m["name"]).startswith(("HEADLESS-", "hypr-rdp-"))]
         addresses = []
         for interface in interfaces[:64]:
             for item in interface.get("addr_info", [])[:16]:
@@ -224,9 +225,21 @@ def inventory():
                 except Problem:
                     continue
                 addresses.append(dict(address=address, interface=str(interface.get("ifname", ""))[:64]))
-        return dict(outputs=outputs, addresses=addresses[:64])
+        return addresses[:64]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise Problem("Cannot read network addresses. Try refreshing.") from None
+
+
+def inventory():
+    try:
+        monitors = json.loads(run(["hyprctl", "-j", "monitors"], timeout=1))
+        outputs = [dict(name=m["name"], label=str(m.get("description") or m["name"])[:160])
+                   for m in monitors[:32] if isinstance(m, dict)
+                   and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", str(m.get("name", "")))
+                   and not str(m["name"]).startswith(("HEADLESS-", "hypr-rdp-"))]
     except (ValueError, KeyError, TypeError, AttributeError):
         raise Problem("Cannot read monitors or network addresses. Try refreshing.") from None
+    return dict(outputs=outputs, addresses=network_addresses())
 
 
 def check_backend():
@@ -579,12 +592,24 @@ WantedBy=graphical-session.target
                 raise Problem("Remote access is disabled.")
             self.preflight(conf)
             save_json(self.runtime / "generation.json", {"id": generation})
-            child = subprocess.Popen(self.backend_args(conf, generation), stdin=subprocess.DEVNULL,
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # The backend's own log, kept out of status messages (see Problem)
+            # but on disk so a crash can be diagnosed. Replaced on each start;
+            # O_EXCL after the unlink never follows a planted link.
+            log_path = self.runtime / "backend.log"
+            with contextlib.suppress(FileNotFoundError):
+                log_path.unlink()
+            log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                child = subprocess.Popen(self.backend_args(conf, generation), stdin=subprocess.DEVNULL,
+                                         stdout=log_fd, stderr=log_fd)
+            finally:
+                os.close(log_fd)
             started = time.monotonic()
+            failed_checks = 0
             while not stopped:
                 if child.poll() is not None:
-                    raise Problem("The RDP server stopped. Check your backend version, monitor and graphics driver.")
+                    raise Problem("The RDP server stopped. Details are in "
+                                  "$XDG_RUNTIME_DIR/omarchy-remote-desktop/backend.log.")
                 if not self.plugin_enabled():
                     child.terminate()
                     try:
@@ -600,7 +625,18 @@ WantedBy=graphical-session.target
                 if not current["enabled"]:
                     break
                 self.credential()
-                self.match_inventory(conf, inventory(), check_output=False)
+                # The session renders on its own headless output, so only the
+                # network matters here. A check that cannot run (timeout, busy
+                # system) is retried; an address that is really gone is not.
+                try:
+                    live = dict(outputs=[], addresses=network_addresses())
+                except Problem:
+                    failed_checks += 1
+                    if failed_checks > DISCOVERY_GRACE:
+                        raise
+                else:
+                    failed_checks = 0
+                    self.match_inventory(conf, live, check_output=False)
                 event = read_json(self.runtime / "event.json", missing=True)
                 connected = bool(event and event.get("generation") == generation and event.get("connected"))
                 # Inspect the child's socket ownership, not another server's port.

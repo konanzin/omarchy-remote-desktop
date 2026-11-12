@@ -29,7 +29,7 @@ class SupervisorTests(unittest.TestCase):
         self.write(self.data / "settings.json", json.dumps(settings))
         self.write(self.data / "password", "test-password-not-a-real-secret")
         self.child_script = self.base / "child.py"
-        self.child_script.write_text("import os,time,pathlib\npathlib.Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))\ntime.sleep(60)\n")
+        self.child_script.write_text("import os,sys,time,pathlib\npathlib.Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))\nprint('backend-started', file=sys.stderr, flush=True)\ntime.sleep(60)\n")
         # Patch only environmental discovery and the RDP engine. All supervision,
         # filesystem validation, credential checks and termination are real.
         driver = self.base / "driver.py"
@@ -44,7 +44,19 @@ app.plugin_enabled = lambda: (base/'flags/plugin').exists()
 app.preflight = lambda conf: app.credential()
 rd.systemctl = lambda *args, **kwargs: ''
 rd.child_listens = lambda *args: True
-rd.inventory = lambda: dict(outputs=[dict(name='DP-1')] if (base/'flags/monitor').exists() else [], addresses=[dict(address='192.168.1.5')] if (base/'flags/network').exists() else [])
+rd.DISCOVERY_GRACE = 2
+def network_addresses():
+    # The system stalls for a moment while Hyprland moves the desktop onto the
+    # headless output: any discovery can time out then.
+    if (base/'flags/stall').exists():
+        raise rd.Problem("ip took too long. Try again.")
+    return [dict(address='192.168.1.5')] if (base/'flags/network').exists() else []
+def inventory():
+    if (base/'flags/stall').exists():
+        raise rd.Problem("hyprctl took too long. Try again.")
+    return dict(outputs=[dict(name='DP-1')] if (base/'flags/monitor').exists() else [], addresses=network_addresses())
+rd.network_addresses = network_addresses
+rd.inventory = inventory
 app.backend_args = lambda *args: [sys.executable, str(base/'child.py')]
 result = app.supervise()
 sys.exit(1 if result.get('failed') else 0)
@@ -102,6 +114,25 @@ sys.exit(1 if result.get('failed') else 0)
         self.assertIsNone(self.proc.poll())
         os.kill(self.pid, 0)
 
+    def test_brief_discovery_stall_keeps_session(self):
+        # Moving the desktop onto the headless output can stall the system for
+        # a moment; one slow check must not end a live session.
+        (self.flags / "stall").touch()
+        time.sleep(1.5)
+        (self.flags / "stall").unlink()
+        time.sleep(1.5)
+        self.assertIsNone(self.proc.poll())
+        os.kill(self.pid, 0)
+
+    def test_lasting_discovery_failure_stops_backend(self):
+        (self.flags / "stall").touch()
+        self.assert_stopped()
+
+    def test_backend_output_goes_to_private_log(self):
+        log = self.runtime / "omarchy-remote-desktop/backend.log"
+        self.wait_for(lambda: log.exists() and b"backend-started" in log.read_bytes())
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+
     def test_deleted_password_stops_backend(self):
         (self.data / "password").unlink()
         self.assert_stopped()
@@ -123,6 +154,7 @@ sys.exit(1 if result.get('failed') else 0)
         status = json.loads((self.runtime / "omarchy-remote-desktop/status.json").read_text())
         self.assertEqual(status["state"], "Error")
         self.assertIn("server stopped", status["error"])
+        self.assertIn("backend.log", status["error"])
 
     def test_backend_survives_without_any_shell_heartbeat(self):
         time.sleep(1.2)
